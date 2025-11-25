@@ -1,8 +1,17 @@
+import os
 import time
 import random
+
+# 禁用libpng警告
+os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = '1'
+os.environ['SDL_AUDIODRIVER'] = 'directsound'
+
 import pygame
-from threading import Thread
 from settings import Settings
+
+# 图像和音效缓存
+IMAGE_CACHE = {}
+SOUND_CACHE = {}
 
 
 class BaseSprite(pygame.sprite.Sprite):
@@ -14,7 +23,10 @@ class BaseSprite(pygame.sprite.Sprite):
         self.screen = screen
         self.direction = None
         self.speed = None
-        self.image = pygame.image.load(image_name)
+        # 使用图像缓存避免重复加载
+        if image_name not in IMAGE_CACHE:
+            IMAGE_CACHE[image_name] = pygame.image.load(image_name)
+        self.image = IMAGE_CACHE[image_name]
         self.rect = self.image.get_rect()
 
     def update(self):
@@ -34,6 +46,29 @@ class Bullet(BaseSprite):
     def __init__(self, image_name, screen):
         super().__init__(image_name, screen)
         self.speed = Settings.BULLET_SPEED
+        self.original_image = self.image  # 保存原始图像，用于旋转
+    
+    def rotate(self):
+        """
+        根据方向旋转子弹图像
+        """
+        if self.direction == Settings.RIGHT:
+            # 向右方向，无需旋转（默认可能就是向右）
+            pass
+        elif self.direction == Settings.LEFT:
+            # 向左方向，旋转180度
+            self.image = pygame.transform.rotate(self.original_image, 180)
+        elif self.direction == Settings.UP:
+            # 向上方向，旋转90度（逆时针）
+            self.image = pygame.transform.rotate(self.original_image, 90)
+        elif self.direction == Settings.DOWN:
+            # 向下方向，旋转270度（顺时针）或-90度
+            self.image = pygame.transform.rotate(self.original_image, -90)
+        
+        # 更新矩形位置以保持中心不变
+        old_center = self.rect.center
+        self.rect = self.image.get_rect()
+        self.rect.center = old_center
 
 
 class TankSprite(BaseSprite):
@@ -60,24 +95,33 @@ class TankSprite(BaseSprite):
         if len(self.bullets) >= 3:
             return
         if self.type == Settings.HERO:
-            pygame.mixer.music.load(Settings.FIRE_MUSIC)
-            pygame.mixer.music.play()
+            # 使用声音缓存避免重复加载
+            if Settings.FIRE_MUSIC not in SOUND_CACHE:
+                SOUND_CACHE[Settings.FIRE_MUSIC] = pygame.mixer.Sound(Settings.FIRE_MUSIC)
+            SOUND_CACHE[Settings.FIRE_MUSIC].play()
 
         # 发射子弹
         bullet = Bullet(Settings.BULLET_IMAGE_NAME, self.screen)
-        bullet.direction = self.direction
-        if self.direction == Settings.LEFT:
+        # 确保在设置子弹位置之前设置方向
+        current_direction = self.direction  # 保存当前方向，避免在设置过程中方向被更改
+        bullet.direction = current_direction
+        
+        # 旋转子弹图像以匹配方向
+        bullet.rotate()
+        
+        if current_direction == Settings.LEFT:
             bullet.rect.right = self.rect.left
             bullet.rect.centery = self.rect.centery
-        elif self.direction == Settings.RIGHT:
+        elif current_direction == Settings.RIGHT:
             bullet.rect.left = self.rect.right
             bullet.rect.centery = self.rect.centery
-        elif self.direction == Settings.UP:
+        elif current_direction == Settings.UP:
             bullet.rect.bottom = self.rect.top
             bullet.rect.centerx = self.rect.centerx
-        elif self.direction == Settings.DOWN:
+        elif current_direction == Settings.DOWN:
             bullet.rect.top = self.rect.bottom
             bullet.rect.centerx = self.rect.centerx
+        
         self.bullets.add(bullet)
 
     def move_out_wall(self, wall):
@@ -109,19 +153,25 @@ class TankSprite(BaseSprite):
         super(TankSprite, self).update()
 
     def boom(self):
-        pygame.mixer.music.load(Settings.BOOM_MUSIC)
-        pygame.mixer.music.play()
+        # 使用声音缓存
+        if Settings.BOOM_MUSIC not in SOUND_CACHE:
+            SOUND_CACHE[Settings.BOOM_MUSIC] = pygame.mixer.Sound(Settings.BOOM_MUSIC)
+        SOUND_CACHE[Settings.BOOM_MUSIC].play()
+        
+        # 使用图像缓存播放爆炸动画
         for boom in Settings.BOOMS:
-            self.image = pygame.image.load(boom)
-            time.sleep(0.05)
+            if boom not in IMAGE_CACHE:
+                IMAGE_CACHE[boom] = pygame.image.load(boom)
+            self.image = IMAGE_CACHE[boom]
             self.screen.blit(self.image, self.rect)
-        pygame.mixer.music.stop()
+            pygame.display.update(self.rect)
+            
         super(TankSprite, self).kill()
 
     def kill(self):
         self.is_alive = False
-        t = Thread(target=self.boom)
-        t.start()
+        # 直接调用boom方法，避免使用线程导致的内存泄漏
+        self.boom()
 
 
 class Hero(TankSprite):
@@ -138,7 +188,10 @@ class Hero(TankSprite):
         self.rect.bottom = Settings.SCREEN_RECT.bottom
 
     def __turn(self):
-        self.image = pygame.image.load(Settings.HERO_IMAGES.get(self.direction))
+        image_name = Settings.HERO_IMAGES.get(self.direction)
+        if image_name not in IMAGE_CACHE:
+            IMAGE_CACHE[image_name] = pygame.image.load(image_name)
+        self.image = IMAGE_CACHE[image_name]
 
     def hit_wall(self):
         if self.direction == Settings.LEFT and self.rect.left <= 0 or \
@@ -148,9 +201,11 @@ class Hero(TankSprite):
             self.is_hit_wall = True
 
     def update(self):
-        if not self.is_hit_wall:
+        # 始终更新图像方向
+        self.__turn()
+        # 只有在移动且没有撞墙时才更新位置
+        if not self.is_hit_wall and self.is_moving:
             super().update()
-            self.__turn()
 
     def kill(self):
         self.is_alive = False
@@ -166,6 +221,12 @@ class Enemy(TankSprite):
         self.speed = Settings.ENEMY_SPEED
         self.direction = random.randint(0, 3)
         self.terminal = float(random.randint(40*2, 40*8))
+        # 添加帧计数器来控制AI更新频率
+        self.ai_update_counter = 0
+        self.shoot_update_counter = 0
+        # 随机设置每个敌人的AI和射击间隔，增加行为多样性
+        self.ai_update_interval = random.randint(30, 60)  # 30-60帧更新一次AI
+        self.shoot_update_interval = random.randint(20, 50)  # 20-50帧尝试射击一次
 
     def random_turn(self):
         # 随机转向
@@ -174,7 +235,10 @@ class Enemy(TankSprite):
         directions.remove(self.direction)
         self.direction = directions[random.randint(0, 2)]
         self.terminal = float(random.randint(40*2, 40*8))
-        self.image = pygame.image.load(Settings.ENEMY_IMAGES.get(self.direction))
+        image_name = Settings.ENEMY_IMAGES.get(self.direction)
+        if image_name not in IMAGE_CACHE:
+            IMAGE_CACHE[image_name] = pygame.image.load(image_name)
+        self.image = IMAGE_CACHE[image_name]
 
     def random_shot(self):
         shot_flag = random.choice([True] + [False]*59)
@@ -199,12 +263,27 @@ class Enemy(TankSprite):
             self.random_turn()
 
     def update(self):
-        self.random_shot()
-        if self.terminal <= 0:
-            self.random_turn()
-        else:
-            super().update()
-            # 碰墙掉头
+        # 控制射击频率
+        self.shoot_update_counter += 1
+        if self.shoot_update_counter >= self.shoot_update_interval:
+            self.random_shot()
+            self.shoot_update_counter = 0
+            # 动态调整射击间隔，增加不可预测性
+            self.shoot_update_interval = random.randint(20, 50)
+        
+        # 控制AI更新频率
+        self.ai_update_counter += 1
+        if self.ai_update_counter >= self.ai_update_interval:
+            if self.terminal <= 0:
+                self.random_turn()
+                # 动态调整AI更新间隔
+                self.ai_update_interval = random.randint(30, 60)
+            self.ai_update_counter = 0
+        
+        # 正常移动
+        super().update()
+        # 减少terminal值，但不是每帧都更新
+        if self.ai_update_counter % 2 == 0:  # 每两帧更新一次terminal
             self.terminal -= self.speed
 
 
@@ -219,17 +298,23 @@ class Wall(BaseSprite):
         pass
 
     def boom(self):
-        pygame.mixer.music.load(Settings.BOOM_MUSIC)
-        pygame.mixer.music.play()
+        # 使用声音缓存
+        if Settings.BOOM_MUSIC not in SOUND_CACHE:
+            SOUND_CACHE[Settings.BOOM_MUSIC] = pygame.mixer.Sound(Settings.BOOM_MUSIC)
+        SOUND_CACHE[Settings.BOOM_MUSIC].play()
+        
+        # 使用图像缓存播放爆炸动画
         for boom in Settings.BOOMS:
-            self.image = pygame.image.load(boom)
-            time.sleep(0.07)
+            if boom not in IMAGE_CACHE:
+                IMAGE_CACHE[boom] = pygame.image.load(boom)
+            self.image = IMAGE_CACHE[boom]
             self.screen.blit(self.image, self.rect)
-        pygame.mixer.music.stop()
+            pygame.display.update(self.rect)
+            
         super().kill()
 
     def kill(self):
         self.life -= 1
         if not self.life:
-            t = Thread(target=self.boom)
-            t.start()
+            # 直接调用boom方法，避免使用线程导致的内存泄漏
+            self.boom()

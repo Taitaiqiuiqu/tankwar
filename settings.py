@@ -53,6 +53,7 @@ class Settings:
         DOWN: "./resources/images/hero/hero1D.gif"
     }
     HERO_SPEED = 2
+    
     BOSS_IMAGE = "./resources/images/5.png"
     # 我方老家
 

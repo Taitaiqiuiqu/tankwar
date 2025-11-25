@@ -1,10 +1,23 @@
+import os
+
+# 禁用libpng警告
+os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = '1'
+os.environ['SDL_AUDIODRIVER'] = 'directsound'
+
 import pygame
 from sprites import *
 
 
 class TankWar:
+    # 游戏状态常量
+    MENU = 0
+    GAME_RUNNING = 1
+    GAME_OVER = 2
 
     def __init__(self):
+        # 先初始化pygame
+        self.__init_game()
+        
         self.screen = pygame.display.set_mode(Settings.SCREEN_RECT.size)
         self.clock = pygame.time.Clock()
         self.game_still = True
@@ -12,7 +25,96 @@ class TankWar:
         self.enemies = None
         self.enemy_bullets = None
         self.walls = None
+        self.game_state = self.MENU  # 初始状态为菜单
+        self.menu_buttons = []
+        self.__init_menu()
 
+    def __init_menu(self):
+        """
+        初始化菜单按钮
+        """
+        # 按钮颜色
+        self.button_color = (0, 150, 0)
+        self.button_hover_color = (0, 200, 0)
+        self.text_color = (255, 255, 255)
+        
+        # 创建字体
+        self.font = pygame.font.SysFont(None, 48)
+        self.title_font = pygame.font.SysFont(None, 72)
+        
+        # 创建按钮
+        # 开始游戏按钮
+        start_text = self.font.render("开始游戏", True, self.text_color)
+        start_rect = start_text.get_rect(center=(Settings.SCREEN_RECT.centerx, Settings.SCREEN_RECT.centery - 50))
+        self.menu_buttons.append({"text": start_text, "rect": start_rect, "action": "start"})
+        
+        # 退出游戏按钮
+        exit_text = self.font.render("退出游戏", True, self.text_color)
+        exit_rect = exit_text.get_rect(center=(Settings.SCREEN_RECT.centerx, Settings.SCREEN_RECT.centery + 50))
+        self.menu_buttons.append({"text": exit_text, "rect": exit_rect, "action": "exit"})
+    
+    def __draw_menu(self):
+        """
+        绘制开始菜单
+        """
+        # 填充背景色
+        self.screen.fill(Settings.SCREEN_COLOR)
+        
+        # 绘制游戏标题
+        title = self.title_font.render("坦克大战", True, (255, 0, 0))
+        title_rect = title.get_rect(center=(Settings.SCREEN_RECT.centerx, Settings.SCREEN_RECT.centery - 200))
+        self.screen.blit(title, title_rect)
+        
+        # 绘制按钮
+        mouse_pos = pygame.mouse.get_pos()
+        for button in self.menu_buttons:
+            # 检查鼠标是否悬停在按钮上
+            if button["rect"].collidepoint(mouse_pos):
+                # 绘制悬停状态的按钮背景
+                pygame.draw.rect(self.screen, self.button_hover_color, 
+                                (button["rect"].x - 10, button["rect"].y - 5, 
+                                button["rect"].width + 20, button["rect"].height + 10))
+            else:
+                # 绘制普通状态的按钮背景
+                pygame.draw.rect(self.screen, self.button_color, 
+                                (button["rect"].x - 10, button["rect"].y - 5, 
+                                button["rect"].width + 20, button["rect"].height + 10))
+            # 绘制按钮文字
+            self.screen.blit(button["text"], button["rect"])
+        
+        # 更新显示
+        pygame.display.update()
+    
+    def __handle_menu_events(self):
+        """
+        处理菜单事件
+        """
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                TankWar.__game_over()
+            elif event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_RETURN:
+                    # 按Enter键开始游戏
+                    self.__start_game()
+                elif event.key == pygame.K_ESCAPE:
+                    # 按ESC键退出游戏
+                    TankWar.__game_over()
+            elif event.type == pygame.MOUSEBUTTONDOWN:
+                if event.button == 1:  # 左键点击
+                    for button in self.menu_buttons:
+                        if button["rect"].collidepoint(event.pos):
+                            if button["action"] == "start":
+                                self.__start_game()
+                            elif button["action"] == "exit":
+                                TankWar.__game_over()
+    
+    def __start_game(self):
+        """
+        开始游戏
+        """
+        self.game_state = self.GAME_RUNNING
+        self.__create_sprite()
+    
     @staticmethod
     def __init_game():
         """
@@ -119,57 +221,58 @@ class TankWar:
         for enemy in self.enemies:
             enemy.hit_wall_turn()
 
-        # 子弹击中墙
-        for wall in self.walls:
-            # 我方英雄子弹击中墙
-            for bullet in self.hero.bullets:
-                if pygame.sprite.collide_rect(wall, bullet):
-                    if wall.type == Settings.RED_WALL:
-                        wall.kill()
-                        bullet.kill()
-                    elif wall.type == Settings.BOSS_WALL:
-                        self.game_still = False
-                    elif wall.type == Settings.IRON_WALL:
-                        bullet.kill()
-            # 敌方英雄子弹击中墙
-            for enemy in self.enemies:
-                for bullet in enemy.bullets:
-                    if pygame.sprite.collide_rect(wall, bullet):
-                        if wall.type == Settings.RED_WALL:
-                            wall.kill()
-                            bullet.kill()
-                        elif wall.type == Settings.BOSS_WALL:
-                            self.game_still = False
-                        elif wall.type == Settings.IRON_WALL:
-                            bullet.kill()
-
-            # 我方坦克撞墙
-            if pygame.sprite.collide_rect(self.hero, wall):
-                # 不可穿越墙
-                if wall.type == Settings.RED_WALL or wall.type == Settings.IRON_WALL or wall.type == Settings.BOSS_WALL:
-                    self.hero.is_hit_wall = True
-                    # 移出墙内
-                    self.hero.move_out_wall(wall)
-
-            # 敌方坦克撞墙
-            for enemy in self.enemies:
-                if pygame.sprite.collide_rect(wall, enemy):
-                    if wall.type == Settings.RED_WALL or wall.type == Settings.IRON_WALL or wall.type == Settings.BOSS_WALL:
-                        enemy.move_out_wall(wall)
-                        enemy.random_turn()
-
-        # 子弹击中、敌方坦克碰撞、敌我坦克碰撞
-        pygame.sprite.groupcollide(self.hero.bullets, self.enemies, True, True)
-        # 敌方子弹击中我方
+        # 收集所有敌方子弹到一个组，便于批量检测
+        all_enemy_bullets = pygame.sprite.Group()
         for enemy in self.enemies:
-            for bullet in enemy.bullets:
-                if pygame.sprite.collide_rect(bullet, self.hero):
-                    bullet.kill()
-                    self.hero.kill()
+            all_enemy_bullets.add(enemy.bullets)
+
+        # 使用pygame内置的groupcollide方法优化子弹与墙的碰撞检测
+        # 我方子弹与墙的碰撞
+        for bullet, walls_hit in pygame.sprite.groupcollide(self.hero.bullets, self.walls, False, False).items():
+            for wall in walls_hit:
+                bullet.kill()
+                if wall.type == Settings.RED_WALL:
+                    wall.kill()
+                elif wall.type == Settings.BOSS_WALL:
+                    self.game_still = False
+
+        # 敌方子弹与墙的碰撞
+        for bullet, walls_hit in pygame.sprite.groupcollide(all_enemy_bullets, self.walls, False, False).items():
+            for wall in walls_hit:
+                bullet.kill()
+                if wall.type == Settings.RED_WALL:
+                    wall.kill()
+                elif wall.type == Settings.BOSS_WALL:
+                    self.game_still = False
+
+        # 坦克与墙的碰撞检测 - 使用spritecollide方法
+        # 我方坦克撞墙
+        walls_hit_by_hero = pygame.sprite.spritecollide(self.hero, self.walls, False)
+        for wall in walls_hit_by_hero:
+            if wall.type == Settings.RED_WALL or wall.type == Settings.IRON_WALL or wall.type == Settings.BOSS_WALL:
+                self.hero.is_hit_wall = True
+                self.hero.move_out_wall(wall)
+
+        # 敌方坦克撞墙
+        for enemy in self.enemies:
+            walls_hit_by_enemy = pygame.sprite.spritecollide(enemy, self.walls, False)
+            for wall in walls_hit_by_enemy:
+                if wall.type == Settings.RED_WALL or wall.type == Settings.IRON_WALL or wall.type == Settings.BOSS_WALL:
+                    enemy.move_out_wall(wall)
+                    enemy.random_turn()
+
+        # 我方子弹击中敌方坦克
+        pygame.sprite.groupcollide(self.hero.bullets, self.enemies, True, True)
+        
+        # 敌方子弹击中我方坦克
+        if self.hero.is_alive:
+            bullets_hit_hero = pygame.sprite.spritecollide(self.hero, all_enemy_bullets, True)
+            if bullets_hit_hero:
+                self.hero.kill()
 
     def __update_sprites(self):
-        if self.hero.is_moving:
-            self.hero.update()
+        # 总是更新英雄坦克，确保方向变化时图像也会更新
+        self.hero.update()
         self.walls.update()
         self.hero.bullets.update()
         self.enemies.update()
@@ -182,23 +285,43 @@ class TankWar:
         self.walls.draw(self.screen)
 
     def run_game(self):
-        self.__init_game()
-        self.__create_sprite()
-        while True and self.hero.is_alive and self.game_still:
-            self.screen.fill(Settings.SCREEN_COLOR)
-            # 1、设置刷新帧率
+        # pygame已经在__init__中初始化
+        
+        while True:
+            # 设置刷新帧率
             self.clock.tick(Settings.FPS)
-            # 2、事件监听
-            self.__event_handler()
-            # 3、碰撞监测
-            self.__check_collide()
-            # 4、更新/绘制精灵/经理组
-            self.__update_sprites()
-            # 5、更新显示
-            pygame.display.update()
-        self.__game_over()
+            
+            # 根据游戏状态执行不同的逻辑
+            if self.game_state == self.MENU:
+                # 菜单状态
+                self.__draw_menu()
+                self.__handle_menu_events()
+            elif self.game_state == self.GAME_RUNNING:
+                # 游戏运行状态
+                if self.hero.is_alive and self.game_still:
+                    self.screen.fill(Settings.SCREEN_COLOR)
+                    # 1、事件监听
+                    self.__event_handler()
+                    # 2、碰撞监测
+                    self.__check_collide()
+                    # 3、更新/绘制精灵/经理组
+                    self.__update_sprites()
+                    # 4、更新显示
+                    pygame.display.update()
+                else:
+                    # 游戏结束
+                    self.game_state = self.GAME_OVER
+                    # 可以添加游戏结束画面
+                    self.__game_over()
+            elif self.game_state == self.GAME_OVER:
+                # 游戏结束状态
+                self.__game_over()
 
     @staticmethod
     def __game_over():
+        # 清理缓存资源，释放内存
+        from sprites import IMAGE_CACHE, SOUND_CACHE
+        IMAGE_CACHE.clear()
+        SOUND_CACHE.clear()
         pygame.quit()
         exit()

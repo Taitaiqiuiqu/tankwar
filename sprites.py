@@ -30,6 +30,10 @@ class BaseSprite(pygame.sprite.Sprite):
         self.rect = self.image.get_rect()
 
     def update(self):
+        # 只有在is_moving为True时才移动（如果对象有这个属性）
+        if hasattr(self, 'is_moving') and not self.is_moving:
+            return
+        
         # 根据方向移动
         if self.direction == Settings.LEFT:
             self.rect.x -= self.speed
@@ -163,8 +167,8 @@ class TankSprite(BaseSprite):
             if boom not in IMAGE_CACHE:
                 IMAGE_CACHE[boom] = pygame.image.load(boom)
             self.image = IMAGE_CACHE[boom]
-            self.screen.blit(self.image, self.rect)
-            pygame.display.update(self.rect)
+            # 只更新精灵组，不直接更新显示，由主循环统一管理更新
+            # pygame.display.update(self.rect)
             
         super(TankSprite, self).kill()
 
@@ -308,8 +312,8 @@ class Wall(BaseSprite):
             if boom not in IMAGE_CACHE:
                 IMAGE_CACHE[boom] = pygame.image.load(boom)
             self.image = IMAGE_CACHE[boom]
-            self.screen.blit(self.image, self.rect)
-            pygame.display.update(self.rect)
+            # 只更新精灵组，不直接更新显示，由主循环统一管理更新
+            # pygame.display.update(self.rect)
             
         super().kill()
 
@@ -318,3 +322,16 @@ class Wall(BaseSprite):
         if not self.life:
             # 直接调用boom方法，避免使用线程导致的内存泄漏
             self.boom()
+
+
+# Compatibility: provide a PlayerTank alias/class expected by legacy code
+class PlayerTank(TankSprite):
+    """
+    PlayerTank is a thin compatibility subclass used by older codepaths
+    (e.g. `tank_war.py`). It behaves like a generic TankSprite and accepts
+    the same constructor signature (image_name, screen).
+    """
+    def __init__(self, image_name, screen):
+        super().__init__(image_name, screen)
+        # default to enemy-like behavior unless caller customizes
+        self.type = Settings.ENEMY
